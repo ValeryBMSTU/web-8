@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -28,30 +27,46 @@ type DatabaseProvider struct {
 }
 
 // Обработчики HTTP-запросов
-func (h *Handlers) GetHello(w http.ResponseWriter, r *http.Request) {
-	msg, err := h.dbProvider.SelectHello()
+func (h *Handlers) GetQuery(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+
+	if name == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Не введен параметр!"))
+		return
+	}
+
+	test, err := h.dbProvider.SelectQuery(name)
+	if !test {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Запись не добавлена в БД!"))
+		return
+	}
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Hello " + msg + "!"))
+	w.Write([]byte("Hello," + name + "!"))
 }
 
-func (h *Handlers) PostHello(w http.ResponseWriter, r *http.Request) {
-	input := struct {
-		Msg string `json:"msg"`
-	}{}
-
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&input)
-	if err != nil {
+func (h *Handlers) PostQuery(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+		w.Write([]byte("Не введен параметр!"))
+		return
 	}
 
-	err = h.dbProvider.InsertHello(input.Msg)
+	test, err := h.dbProvider.SelectQuery(name)
+	if test && err == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Запись уже добавлена БД!"))
+		return
+	}
+
+	err = h.dbProvider.InsertQuery(name)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -62,21 +77,20 @@ func (h *Handlers) PostHello(w http.ResponseWriter, r *http.Request) {
 }
 
 // Методы для работы с базой данных
-func (dp *DatabaseProvider) SelectHello() (string, error) {
-	var msg string
+func (dp *DatabaseProvider) SelectQuery(msg string) (bool, error) {
+	var rec string
 
-	// Получаем одно сообщение из таблицы hello, отсортированной в случайном порядке
-	row := dp.db.QueryRow("SELECT name_hello FROM hello ORDER BY RANDOM() LIMIT 1")
-	err := row.Scan(&msg)
+	row := dp.db.QueryRow("SELECT record FROM query WHERE record = ($1)", msg)
+	err := row.Scan(&rec)
 	if err != nil {
-		return "", err
+		return false, err
 	}
 
-	return msg, nil
+	return true, nil
 }
 
-func (dp *DatabaseProvider) InsertHello(msg string) error {
-	_, err := dp.db.Exec("INSERT INTO hello (name_hello) VALUES ($1)", msg)
+func (dp *DatabaseProvider) InsertQuery(msg string) error {
+	_, err := dp.db.Exec("INSERT INTO query (record) VALUES ($1)", msg)
 	if err != nil {
 		return err
 	}
@@ -86,7 +100,7 @@ func (dp *DatabaseProvider) InsertHello(msg string) error {
 
 func main() {
 	// Считываем аргументы командной строки
-	address := flag.String("address", "127.0.0.1:8081", "адрес для запуска сервера")
+	address := flag.String("address", "127.0.0.1:8083", "адрес для запуска сервера")
 	flag.Parse()
 
 	// Формирование строки подключения для postgres
@@ -107,8 +121,8 @@ func main() {
 	h := Handlers{dbProvider: dp}
 
 	// Регистрируем обработчики
-	http.HandleFunc("/get", h.GetHello)
-	http.HandleFunc("/post", h.PostHello)
+	http.HandleFunc("/get", h.GetQuery)
+	http.HandleFunc("/post", h.PostQuery)
 
 	// Запускаем веб-сервер на указанном адресе
 	err = http.ListenAndServe(*address, nil)
