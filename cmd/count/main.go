@@ -1,5 +1,6 @@
 package main
 
+// некоторые импорты нужны для проверки
 import (
 	"database/sql"
 	"encoding/json"
@@ -7,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	_ "github.com/lib/pq"
 )
@@ -26,55 +28,55 @@ type DatabaseProvider struct {
 	db *sql.DB
 }
 
-// Обработчики HTTP-запросов
-func (h *Handlers) GetHello(w http.ResponseWriter, r *http.Request) {
-	msg, err := h.dbProvider.SelectHello()
+// обработчики http-запросов
+func (h *Handlers) GetCounter(w http.ResponseWriter, r *http.Request) {
+	msg, err := h.dbProvider.SelectCounter()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(msg))
+	w.Write([]byte("Счетчик: " + strconv.Itoa(msg)))
 }
-func (h *Handlers) PostHello(w http.ResponseWriter, r *http.Request) {
+
+func (h *Handlers) PostCounter(w http.ResponseWriter, r *http.Request) {
 	input := struct {
-		Msg string `json:"msg"`
+		Msg int `json:"msg"`
 	}{}
 
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&input)
 	if err != nil {
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(err.Error()))
-		}
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
 	}
 
-	err = h.dbProvider.InsertHello(input.Msg)
+	err = h.dbProvider.UpdateCounter(input.Msg)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 	}
 
 	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte("Изменили счетчик!"))
 }
 
-// Методы для работы с базой данных
-func (dp *DatabaseProvider) SelectHello() (string, error) {
-	var msg string
+// методы для работы с базой данных
+func (dp *DatabaseProvider) SelectCounter() (int, error) {
+	var msg int
 
-	// Получаем одно сообщение из таблицы hello, отсортированной в случайном порядке
-	row := dp.db.QueryRow("SELECT message FROM hello ORDER BY RANDOM() LIMIT 1")
+	row := dp.db.QueryRow("SELECT number FROM counter WHERE id_number = 1")
 	err := row.Scan(&msg)
 	if err != nil {
-		return "", err
+		return -1, err
 	}
 
 	return msg, nil
 }
-func (dp *DatabaseProvider) InsertHello(msg string) error {
-	_, err := dp.db.Exec("INSERT INTO hello (message) VALUES ($1)", msg)
+
+func (dp *DatabaseProvider) UpdateCounter(msg int) error {
+	_, err := dp.db.Exec("UPDATE counter SET number = number + $1 WHERE id_number = 1", msg)
 	if err != nil {
 		return err
 	}
@@ -84,7 +86,7 @@ func (dp *DatabaseProvider) InsertHello(msg string) error {
 
 func main() {
 	// Считываем аргументы командной строки
-	address := flag.String("address", "127.0.0.1:8081", "адрес для запуска сервера")
+	address := flag.String("address", "127.0.0.1:8082", "адрес для запуска сервера")
 	flag.Parse()
 
 	// Формирование строки подключения для postgres
@@ -105,8 +107,8 @@ func main() {
 	h := Handlers{dbProvider: dp}
 
 	// Регистрируем обработчики
-	http.HandleFunc("/get", h.GetHello)
-	http.HandleFunc("/post", h.PostHello)
+	http.HandleFunc("/get", h.GetCounter)
+	http.HandleFunc("/post", h.PostCounter)
 
 	// Запускаем веб-сервер на указанном адресе
 	err = http.ListenAndServe(*address, nil)
